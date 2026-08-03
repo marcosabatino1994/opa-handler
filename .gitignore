@@ -1,0 +1,103 @@
+# ===========================
+# Java / Maven / Quarkus
+# ===========================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+replay_pid*
+
+# Maven wrapper cache
+.mvn/wrapper/maven-wrapper.jar
+
+# Quarkus
+.quarkus/
+
+# ===========================
+# Angular / Node.js
+# ===========================
+node_modules/
+dist/
+tmp/
+out-tsc/
+bazel-out/
+
+# Angular cache
+.angular/
+
+# NPM / Yarn
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# ===========================
+# IDEs & Editors
+# ===========================
+
+# IntelliJ IDEA / JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Eclipse
+.classpath
+.project
+.settings/
+.factorypath
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# NetBeans
+nbproject/private/
+nbbuild/
+nbdist/
+nbactions.xml
+nb-configuration.xml
+
+# ===========================
+# OS
+# ===========================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ===========================
+# Environment & Secrets
+# ===========================
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.jks
+application-local.properties
+application-local.yml
+
+# ===========================
+# Logs & Reports
+# ===========================
+*.log
+logs/
+surefire-reports/
+failsafe-reports/
+coverage/
+
+# ===========================
+# Podman / Docker
+# ===========================
+.podman/
+docker-compose.override.yml
