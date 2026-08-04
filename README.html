@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POC — RBAC con Open Policy Agent (OPA)</title>
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --surface: #ffffff;
+    --ink: #26251f;
+    --ink-soft: #5c5a50;
+    --line: #e6e3da;
+    --accent: #b5502a;
+    --accent-soft: #f3e7e0;
+    --code-bg: #f4f2ec;
+    --code-ink: #3a3830;
+    --teal: #2f6f6a;
+    --blue: #2f5a86;
+    --purple: #6a4a86;
+    --amber: #9a6a1e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1917;
+      --surface: #232220;
+      --ink: #e7e4da;
+      --ink-soft: #a6a297;
+      --line: #34322d;
+      --accent: #e0895f;
+      --accent-soft: #3a2a22;
+      --code-bg: #14130f;
+      --code-ink: #d6d3c8;
+      --teal: #7fc2bc;
+      --blue: #86aede;
+      --purple: #bfa0dc;
+      --amber: #d9ab63;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    font-size: 16px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+  header.hero {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 1.8rem;
+    margin-bottom: 2.5rem;
+  }
+  header.hero .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.72rem;
+    color: var(--accent);
+    font-weight: 600;
+    margin: 0 0 0.6rem;
+  }
+  h1 { font-size: 2.05rem; line-height: 1.15; margin: 0 0 0.8rem; letter-spacing: -0.01em; }
+  header.hero p { color: var(--ink-soft); margin: 0.4rem 0 0; max-width: 60ch; }
+  h2 {
+    font-size: 1.4rem;
+    margin: 3rem 0 1rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--line);
+    letter-spacing: -0.01em;
+  }
+  h3 { font-size: 1.08rem; margin: 1.8rem 0 0.6rem; }
+  p, li { color: var(--ink); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    font-family: "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--code-bg);
+    color: var(--code-ink);
+    padding: 0.12em 0.4em;
+    border-radius: 5px;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    padding: 1.1rem 1.2rem;
+    border-radius: 10px;
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    font-size: 0.84rem;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2rem 0;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th { color: var(--ink-soft); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: none; }
+  blockquote {
+    margin: 1.4rem 0;
+    padding: 0.8rem 1.2rem;
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    color: var(--ink);
+  }
+  blockquote p { margin: 0.3rem 0; }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 1.2rem 1.5rem;
+    margin: 2rem 0;
+  }
+  .toc h2 { border: none; margin: 0 0 0.6rem; padding: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft); }
+  .toc ul { columns: 2; column-gap: 2rem; margin: 0; padding-left: 1.1rem; }
+  .toc li { margin: 0.25rem 0; font-size: 0.92rem; }
+  .oneline { font-style: italic; color: var(--ink-soft); }
+  .lead { font-size: 1.05rem; }
+  hr { border: none; border-top: 1px solid var(--line); margin: 2.5rem 0; }
+  .pill { display: inline-block; font-size: 0.72rem; font-weight: 600; padding: 0.1em 0.6em; border-radius: 20px; background: var(--accent-soft); color: var(--accent); }
+  footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <p class="eyebrow">Proof of Concept</p>
+  <h1>RBAC con Open Policy Agent (OPA)</h1>
+  <p class="lead">Un sistema di autorizzazione basato su ruoli in cui una console di amministrazione gestisce utenti, ruoli e permessi su database, e OPA prende le decisioni leggendo quei dati.</p>
+  <p>L'architettura segue il pattern <strong>produzione</strong>: policy e dati vivono in <strong>due bundle separati</strong>, serviti da sorgenti diverse, che OPA scarica autonomamente (pull) e combina in memoria.</p>
+</header>
+
+<nav class="toc">
+  <h2>Indice</h2>
+  <ul>
+    <li><a href="#concetti">Concetti chiave</a></li>
+    <li><a href="#architettura">Architettura</a></li>
+    <li><a href="#componenti">Componenti</a></li>
+    <li><a href="#opaconfig">Il ruolo di opa-config.yaml</a></li>
+    <li><a href="#scenario">Come funziona il giro (scenario)</a></li>
+    <li><a href="#decisioni">Decisioni di progetto</a></li>
+    <li><a href="#dati">Modello dati</a></li>
+    <li><a href="#endpoint">Endpoint del backend</a></li>
+    <li><a href="#avvio">Come avviare tutto</a></li>
+    <li><a href="#riavvii">Riavvii successivi</a></li>
+    <li><a href="#verifiche">Verifiche</a></li>
+    <li><a href="#limiti">Note e limiti</a></li>
+    <li><a href="#prossimi">Prossimi passi</a></li>
+  </ul>
+</nav>
+
+<h2 id="concetti">Concetti chiave</h2>
+<p>Il principio fondante di OPA è la separazione tra:</p>
+<ul>
+  <li><strong>Policy</strong> — la <em>logica</em> delle decisioni, scritta in Rego (es. "consenti se il ruolo dell'utente possiede il permesso richiesto"). È stabile, cambia raramente.</li>
+  <li><strong>Dati</strong> — i <em>fatti</em> su cui la logica ragiona (es. "mario ha il ruolo admin", "admin può leggere i report"). Cambiano di continuo.</li>
+</ul>
+<p>OPA <strong>non conosce il database</strong>: non ha driver, non si collega a Oracle. Vive con in memoria solo le policy e un documento <code>data</code>. Il compito del sistema è portare i dati dentro OPA. Qui lo facciamo con i <strong>bundle</strong>: pacchetti <code>.tar.gz</code> che OPA scarica via HTTP a intervalli regolari (polling).</p>
+
+<h2 id="architettura">Architettura</h2>
+<svg viewBox="0 0 1000 630" style="width:100%;height:auto;display:block;margin:1.2rem 0;font-family:inherit;" role="img" aria-label="Diagramma dell'architettura">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- label sorgente policy -->
+  <text x="40" y="34" fill="var(--ink)" font-size="15" font-weight="600">Sorgente POLICY (esterna)</text>
+
+  <!-- GitHub Releases -->
+  <rect x="40" y="48" width="250" height="70" rx="10" fill="var(--purple)" fill-opacity="0.13" stroke="var(--purple)" stroke-width="1.3"/>
+  <text x="165" y="80" text-anchor="middle" fill="var(--purple)" font-size="16" font-weight="600">GitHub Releases</text>
+  <text x="165" y="101" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">rbac.rego versionata</text>
+
+  <!-- rete container box -->
+  <rect x="25" y="185" width="950" height="420" rx="14" fill="var(--ink)" fill-opacity="0.03" stroke="var(--line)" stroke-width="1.3" stroke-dasharray="6 5"/>
+  <text x="48" y="212" fill="var(--ink-soft)" font-size="13">rete rbac-net (container)</text>
+
+  <!-- Dashboard -->
+  <rect x="70" y="250" width="220" height="64" rx="10" fill="var(--ink)" fill-opacity="0.05" stroke="var(--ink-soft)" stroke-width="1.2"/>
+  <text x="180" y="278" text-anchor="middle" fill="var(--ink)" font-size="15" font-weight="600">Dashboard admin</text>
+  <text x="180" y="298" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">Angular · CRUD</text>
+
+  <!-- Quarkus -->
+  <rect x="70" y="390" width="220" height="72" rx="10" fill="var(--teal)" fill-opacity="0.13" stroke="var(--teal)" stroke-width="1.3"/>
+  <text x="180" y="420" text-anchor="middle" fill="var(--teal)" font-size="16" font-weight="600">Quarkus</text>
+  <text x="180" y="440" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">API + bundle DATI</text>
+
+  <!-- Oracle -->
+  <rect x="70" y="530" width="220" height="64" rx="10" fill="var(--blue)" fill-opacity="0.13" stroke="var(--blue)" stroke-width="1.3"/>
+  <text x="180" y="558" text-anchor="middle" fill="var(--blue)" font-size="16" font-weight="600">Oracle</text>
+  <text x="180" y="578" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">fonte di verità</text>
+
+  <!-- OPA -->
+  <rect x="650" y="378" width="290" height="112" rx="10" fill="var(--amber)" fill-opacity="0.13" stroke="var(--amber)" stroke-width="1.3"/>
+  <text x="795" y="410" text-anchor="middle" fill="var(--amber)" font-size="16" font-weight="600">OPA</text>
+  <text x="795" y="433" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">scarica i 2 bundle</text>
+  <text x="795" y="452" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">li combina in memoria</text>
+  <text x="795" y="471" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">valuta le decisioni</text>
+
+  <!-- App di test -->
+  <rect x="650" y="530" width="290" height="64" rx="10" fill="var(--ink)" fill-opacity="0.05" stroke="var(--ink-soft)" stroke-width="1.2"/>
+  <text x="795" y="558" text-anchor="middle" fill="var(--ink)" font-size="15" font-weight="600">App di test</text>
+  <text x="795" y="578" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">Angular · "può fare X?"</text>
+
+  <!-- Dashboard -> Quarkus -->
+  <line x1="180" y1="314" x2="180" y2="388" stroke="var(--ink-soft)" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="192" y="355" fill="var(--ink-soft)" font-size="12.5">REST</text>
+
+  <!-- Quarkus -> Oracle -->
+  <line x1="180" y1="462" x2="180" y2="528" stroke="var(--ink-soft)" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="192" y="500" fill="var(--ink-soft)" font-size="12.5">JDBC</text>
+
+  <!-- Quarkus -> OPA (bundle dati) -->
+  <line x1="290" y1="412" x2="648" y2="412" stroke="var(--ink-soft)" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="470" y="402" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">bundle DATI · polling 10–20s</text>
+
+  <!-- OPA -> Quarkus (proxy authz) dashed -->
+  <line x1="648" y1="448" x2="292" y2="448" stroke="var(--ink-soft)" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#arr)"/>
+  <text x="470" y="466" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">via Quarkus (proxy /authz)</text>
+
+  <!-- GitHub -> OPA (bundle policy) -->
+  <path d="M165 118 L165 150 L795 150 L795 376" fill="none" stroke="var(--ink-soft)" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="520" y="142" text-anchor="middle" fill="var(--ink-soft)" font-size="12.5">bundle POLICY · polling 30–60s</text>
+
+  <!-- App di test -> OPA -->
+  <line x1="795" y1="530" x2="795" y2="492" stroke="var(--ink-soft)" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="807" y="514" fill="var(--ink-soft)" font-size="12.5">query allow</text>
+</svg>
+<p>Il flusso in una riga: <strong>Dashboard → Oracle → (bundle dati) Quarkus + (bundle policy) GitHub → OPA li combina → decisione</strong>.</p>
+
+<h2 id="componenti">Componenti</h2>
+<table>
+  <thead><tr><th>Componente</th><th>Ruolo</th><th>Sorgente / dettaglio</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Oracle</strong></td><td>Fonte di verità: utenti, ruoli, permessi, associazioni</td><td>container <code>oracle-poc</code>, immagine <code>gvenzl/oracle-free</code>, service <code>FREEPDB1</code></td></tr>
+    <tr><td><strong>Quarkus</strong></td><td>Backend REST: CRUD della dashboard + generazione del bundle DATI dal DB</td><td>container <code>rbac-opa</code>, porta 8080</td></tr>
+    <tr><td><strong>OPA</strong></td><td>Motore di decisione: scarica i due bundle, li combina, valuta le query</td><td>container <code>opa-bundles</code>, porta 8181</td></tr>
+    <tr><td><strong>GitHub Releases</strong></td><td>Sorgente del bundle POLICY (rbac.rego versionata)</td><td>repo <code>opa-policy</code>, release <code>v1</code>, asset <code>bundle.tar.gz</code></td></tr>
+    <tr><td><strong>Dashboard admin</strong></td><td><span class="pill">da fare</span> UI Angular sul CRUD</td><td>—</td></tr>
+    <tr><td><strong>App di test</strong></td><td><span class="pill">da fare</span> UI Angular che interroga OPA</td><td>—</td></tr>
+  </tbody>
+</table>
+<p>Tutti i container stanno sulla stessa rete <code>rbac-net</code> e si raggiungono per nome.</p>
+
+<h2 id="opaconfig">Il ruolo di opa-config.yaml</h2>
+<p><code>opa-config.yaml</code> <strong>non è né policy né dati</strong>: è la configurazione <strong>di OPA stesso</strong>. È il file che dice a OPA <em>cosa fare all'avvio</em> — da quali URL scaricare i bundle, con quale cadenza di polling, e come si chiamano i "services" (le sorgenti).</p>
+<ul>
+  <li><strong>Quando entra in gioco:</strong> una sola volta, <strong>all'avvio del container OPA</strong>. Lanciando OPA con <code>--config-file=/config/opa-config.yaml</code>, OPA legge il file, capisce che deve gestire due bundle (<code>data</code> e <code>policy</code>) e avvia i "bundle loader" che iniziano il polling. È il <em>bootstrap</em>: senza, OPA parte come un motore vuoto che non sa dove prendere nulla.</li>
+  <li><strong>Dove vive:</strong> è un file <strong>locale</strong> sul disco, <strong>montato</strong> nel container (<code>-v ${PWD}:/config:ro</code>). Distinzione chiave: OPA scarica <em>i bundle</em> da remoto (Quarkus, GitHub), ma la <em>propria configurazione</em> la legge dal filesystem locale — non la scarica da nessuna parte.</li>
+  <li><strong>Conseguenza pratica:</strong> la config viene letta <strong>solo all'avvio</strong>. Ogni modifica richiede di <strong>ricreare il container OPA</strong> perché la rilegga (è ciò che si fa ogni volta che si cambiano i puntamenti, es. da nginx a GitHub).</li>
+</ul>
+<p class="oneline">In una riga: è la mappa che dice a OPA dove trovare policy e dati; la legge all'avvio, dal disco, e definisce l'intero comportamento di download.</p>
+<blockquote><p>NON serve versionare <code>opa-config.yaml</code> su GitHub perché OPA la usi — OPA non la legge da lì. Tenerla in un repo è solo buona pratica di versionamento, non un ingranaggio del meccanismo. (Esiste un meccanismo avanzato, il <em>discovery bundle</em>, con cui OPA può scaricare anche parte della propria config da remoto, ma qui non è usato.)</p></blockquote>
+
+<h2 id="scenario">Come funziona il giro (scenario)</h2>
+<p>Scenario: <em>l'amministratore concede a Luigi il permesso di eliminare i report, e nell'app Luigi vede comparire il pulsante "Elimina".</em></p>
+<ol>
+  <li><strong>L'admin modifica i permessi.</strong> Dalla dashboard assegna a Luigi il ruolo <code>editor</code> (che include <code>delete</code>/<code>report</code>). La dashboard chiama l'API di Quarkus, che scrive su <strong>Oracle</strong> (nuova riga nella tabella ponte <code>USER_ROLES</code>). Qui finisce l'intervento umano: tutto il resto è automatico.</li>
+  <li><strong>Oracle è aggiornato, OPA ancora no.</strong> Per qualche secondo il DB e OPA divergono. È il prezzo (accettabile) del disaccoppiamento: si chiude da solo.</li>
+  <li><strong>OPA fa il polling (entro 10–20s).</strong> OPA chiama <code>GET /bundles/rbac.tar.gz</code> di Quarkus. Quarkus <strong>legge Oracle in tempo reale</strong>, costruisce il JSON dei dati, lo impacchetta e lo restituisce. OPA vede l'ETag cambiato e <strong>attiva il nuovo bundle</strong>. Ora anche OPA sa che Luigi è editor. (In parallelo ricontrolla la policy da GitHub: invariata → <code>304 Not Modified</code>.)</li>
+  <li><strong>Luigi apre l'app.</strong> L'app chiede a OPA "luigi può fare <code>delete</code> su <code>report</code>?". OPA combina la <strong>regola</strong> (bundle policy da GitHub) con i <strong>fatti</strong> (bundle dati da Oracle) e risponde <code>true</code>. L'app mostra il pulsante "Elimina".</li>
+</ol>
+<blockquote><p><strong>Punto chiave:</strong> l'admin ha toccato solo il database. Nessuno ha aggiornato OPA a mano né ridistribuito codice. Il cambiamento è fluito da solo.</p></blockquote>
+
+<h2 id="decisioni">Decisioni di progetto e relativi perché</h2>
+
+<h3>Perché OPA e non <code>if</code> di permessi nel codice Java?</h3>
+<p>Separa la logica di autorizzazione dall'applicazione. Le regole cambiano per motivi e con ritmi diversi rispetto al codice; con OPA si modificano senza toccare/ridistribuire l'app, e la stessa OPA può servire più servizi con policy coerenti.</p>
+
+<h3>Perché separare policy e dati?</h3>
+<p>È il principio fondante di OPA. La policy è logica stabile e riutilizzabile; i dati sono fatti che cambiano di continuo. Separati, la policy resta testabile e i dati aggiornabili senza toccare la logica.</p>
+
+<h3>Perché i bundle e non il push via API?</h3>
+<p>Il push (spingere i dati in OPA con <code>PUT /v1/data/...</code>) è semplice ma fragile: i dati stanno solo in memoria e si perdono al riavvio, e accoppia il backend a OPA. Con i bundle è OPA a "tirare": sopravvive ai riavvii (riscarica) e il backend resta disaccoppiato (espone solo un URL). È lo standard di produzione.</p>
+
+<h3>Perché DUE bundle separati?</h3>
+<p>Policy e dati hanno sorgenti, ritmi e owner diversi. La policy è codice: vive su GitHub, cambia raramente, la modifica un dev con versionamento e review (polling lento, 30–60s). I dati vivono su Oracle, cambiano a ogni modifica in dashboard, li gestisce l'admin (polling veloce, 10–20s). Un unico bundle costringerebbe a ri-pacchettizzare la policy a ogni modifica di un utente. Separati, ognuno segue la sua strada.</p>
+
+<h3>Perché la policy su GitHub?</h3>
+<p>La policy <em>è codice</em>, e il codice vive in un repository versionato: history, tag, rollback, review via PR. (In sviluppo si può usare un semplice server statico come nginx, ma è un ripiego.)</p>
+
+<h3>Perché i dati generati al volo da Oracle e non un file statico?</h3>
+<p>Oracle è la fonte di verità e cambia di continuo; il bundle dati deve esserne lo specchio aggiornato. Quarkus lo costruisce on-demand leggendo le tabelle in tempo reale.</p>
+
+<h3>Perché containerizzare Quarkus?</h3>
+<p>Spinta pratica (il firewall dell'host bloccava le connessioni OPA→Quarkus quando Quarkus girava fuori container), ma coincide con la produzione: tutto in container sulla stessa rete, i servizi si parlano per nome.</p>
+
+<h3>Perché i <code>roots</code> nei manifest dei bundle?</h3>
+<p>Per far convivere due bundle senza conflitti. Ogni bundle dichiara quale ramo di <code>data</code> possiede — <code>authz</code> per la policy, <code>user_roles</code>/<code>role_permissions</code> per i dati. Nessuna sovrapposizione → OPA li accetta entrambi.</p>
+
+<h3>Perché i DTO nel CRUD e non le entità dirette?</h3>
+<p>Per evitare il <code>LazyInitializationException</code> di Hibernate (le collezioni lazy esplodono se serializzate fuori transazione) e per disaccoppiare il modello DB dal contratto REST.</p>
+
+<h3>Perché <code>RESOURCE_NAME</code> invece di <code>resource</code> sul DB?</h3>
+<p><code>RESOURCE</code> è una parola riservata di Oracle: la colonna va rinominata con <code>@Column</code>. Idem per i nomi tabella (<code>APP_USERS</code>, <code>APP_ROLES</code>) al posto di <code>USER</code>/<code>ROLE</code>.</p>
+
+<h2 id="dati">Modello dati</h2>
+<p>Schema RBAC su Oracle (chiavi primarie <code>id</code> autogenerate da Panache):</p>
+<pre><code>APP_USERS (id, username)
+APP_ROLES (id, name)
+PERMISSIONS (id, action, resource_name)
+
+USER_ROLES (user_id → APP_USERS, role_id → APP_ROLES)                -- tabella ponte
+ROLE_PERMISSIONS (role_id → APP_ROLES, permission_id → PERMISSIONS)  -- tabella ponte</code></pre>
+<ul>
+  <li><code>APP_USERS</code> ↔ <code>APP_ROLES</code>: molti-a-molti tramite <code>USER_ROLES</code>.</li>
+  <li><code>APP_ROLES</code> ↔ <code>PERMISSIONS</code>: molti-a-molti tramite <code>ROLE_PERMISSIONS</code>.</li>
+</ul>
+<p>Le due tabelle ponte sono l'unica informazione necessaria a costruire i dati di OPA: <code>USER_ROLES</code> → <code>user_roles</code>, <code>ROLE_PERMISSIONS</code> (join con <code>PERMISSIONS</code>) → <code>role_permissions</code>.</p>
+<p>Esempio del JSON dati prodotto per OPA:</p>
+<pre><code>{
+  "user_roles": { "mario": ["admin"] },
+  "role_permissions": {
+    "admin": [ { "action": "read", "resource": "report" } ]
+  }
+}</code></pre>
+<p>La policy Rego (<code>rbac.rego</code>, ramo <code>authz</code>):</p>
+<pre><code>package authz
+
+import rego.v1
+
+default allow := false
+
+allow if {
+    some role in data.user_roles[input.user]
+    some perm in data.role_permissions[role]
+    perm.action == input.action
+    perm.resource == input.resource
+}</code></pre>
+
+<h2 id="endpoint">Endpoint del backend</h2>
+<p><strong>Quarkus</strong>, porta 8080:</p>
+<table>
+  <thead><tr><th>Metodo</th><th>Path</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td>GET/POST/PUT/DELETE</td><td><code>/permissions</code></td><td>CRUD permessi</td></tr>
+    <tr><td>GET/POST/PUT/DELETE</td><td><code>/roles</code></td><td>CRUD ruoli — body: <code>{ "name": "...", "permissionIds": [..] }</code></td></tr>
+    <tr><td>GET/POST/PUT/DELETE</td><td><code>/users</code></td><td>CRUD utenti — body: <code>{ "username": "...", "roleIds": [..] }</code></td></tr>
+    <tr><td>GET</td><td><code>/authz?user=..&amp;action=..&amp;resource=..</code></td><td>Proxy che interroga OPA</td></tr>
+    <tr><td>GET</td><td><code>/bundles/rbac.tar.gz</code></td><td>Bundle DATI per OPA (generato dal DB, con ETag)</td></tr>
+  </tbody>
+</table>
+<p><strong>OPA</strong>, porta 8181:</p>
+<table>
+  <thead><tr><th>Metodo</th><th>Path</th><th>Descrizione</th></tr></thead>
+  <tbody>
+    <tr><td>POST</td><td><code>/v1/data/authz/allow</code></td><td>Query di decisione; body <code>{ "input": { "user", "action", "resource" } }</code></td></tr>
+    <tr><td>GET</td><td><code>/v1/status</code></td><td>Stato dei bundle attivi (revision)</td></tr>
+    <tr><td>GET</td><td><code>/health</code></td><td>Health check</td></tr>
+  </tbody>
+</table>
+
+<h2 id="avvio">Come avviare tutto</h2>
+<p>Prerequisiti: nerdctl (o Docker), JDK 21, Maven. Comandi PowerShell.</p>
+<blockquote><p><strong>Ordine di avvio (e perché conta):</strong> rete → Oracle → Quarkus → bundle policy → OPA. Ogni componente dipende dai precedenti: Oracle deve essere <em>pronto</em> prima di Quarkus (che vi si connette all'avvio); Quarkus e il bundle policy devono essere raggiungibili prima di OPA (che al primo polling li scarica). Avviare OPA per primo non romperebbe nulla in modo permanente (riproverebbe in loop), ma vedresti errori finché il resto non è su.</p></blockquote>
+
+<h3>1. Rete condivisa</h3>
+<pre><code>nerdctl network create rbac-net</code></pre>
+<p><strong>Perché:</strong> crea una rete virtuale in cui i container si raggiungono <strong>per nome</strong> (es. <code>oracle-poc</code>, <code>rbac-opa</code>) invece che per IP. È ciò che permette a OPA di chiamare Quarkus come <code>http://rbac-opa:8080</code> senza passare dall'host — evitando sia <code>host.docker.internal</code> sia il firewall che bloccava le connessioni container→host.</p>
+
+<h3>2. Oracle</h3>
+<pre><code>nerdctl run -d --name oracle-poc --network rbac-net -p 1521:1521 `
+  -e ORACLE_PASSWORD=poc -e APP_USER=pocuser -e APP_USER_PASSWORD=pocpass `
+  gvenzl/oracle-free</code></pre>
+<p><strong>Perché ogni pezzo:</strong></p>
+<ul>
+  <li><code>-d</code> → in background (detached): il DB gira dietro, il terminale resta libero.</li>
+  <li><code>--name oracle-poc</code> → nome fisso; sarà l'<strong>hostname</strong> con cui Quarkus lo raggiunge sulla rete.</li>
+  <li><code>--network rbac-net</code> → lo mette sulla rete condivisa.</li>
+  <li><code>-p 1521:1521</code> → espone la porta del listener Oracle sull'host, così puoi connetterti da <code>sqlplus</code> per ispezioni manuali (non necessario tra container, ma comodo).</li>
+  <li><code>-e ORACLE_PASSWORD=poc</code> → password dell'utente amministrativo (<code>SYSTEM</code>).</li>
+  <li><code>-e APP_USER</code> / <code>-e APP_USER_PASSWORD</code> → l'immagine crea un utente applicativo dedicato: è buona pratica non usare l'admin dall'applicazione.</li>
+</ul>
+<p>Attendere <code>DATABASE IS READY TO USE!</code> in <code>nerdctl logs -f oracle-poc</code>: lo stato "Up" del container <strong>non basta</strong>, il database interno impiega tempo a inizializzarsi e Quarkus fallirebbe se si collegasse prima.</p>
+
+<h3>3. Quarkus (build immagine + avvio)</h3>
+<p>Nel progetto Quarkus (con <code>quarkus.datasource.jdbc.url</code> puntato a <code>oracle-poc:1521</code>):</p>
+<pre><code>.\mvnw clean package -DskipTests
+nerdctl build -f src/main/docker/Dockerfile.jvm -t poc/rbac-opa:latest .
+nerdctl run -d --name rbac-opa --network rbac-net -p 8080:8080 poc/rbac-opa:latest</code></pre>
+<p><strong>Perché ogni comando:</strong></p>
+<ul>
+  <li><code>.\mvnw clean package -DskipTests</code> → compila il progetto e produce il jar. <code>-DskipTests</code> salta l'esecuzione dei test, che altrimenti proverebbero a connettersi a Oracle durante il build.</li>
+  <li><code>nerdctl build -f src/main/docker/Dockerfile.jvm -t poc/rbac-opa:latest .</code> → costruisce l'immagine. Usiamo il <code>Dockerfile.jvm</code> <strong>generato da Quarkus</strong> perché è già scritto per la struttura "fast-jar" (cartella <code>quarkus-app/</code>). Il build manuale con <code>nerdctl build</code> è preferito a quello automatico dell'estensione container di Quarkus, che non si integra in modo affidabile con nerdctl.</li>
+  <li><code>nerdctl run</code> con: <code>--name rbac-opa</code> (l'indirizzo con cui <strong>OPA</strong> raggiungerà Quarkus), <code>--network rbac-net</code> (stessa rete di Oracle, così <code>oracle-poc:1521</code> risolve), <code>-p 8080:8080</code> (espone Quarkus sull'host per i test).</li>
+</ul>
+<p><strong>Perché containerizzare Quarkus</strong> (e non lanciarlo in dev mode sull'host): quando girava sull'host, il firewall bloccava le connessioni in ingresso da OPA. In container, il suo traffico passa per il port-forwarding di nerdctl (non bloccato) ed è sulla stessa rete degli altri — assetto identico alla produzione.</p>
+
+<h3>4. Bundle policy (su GitHub)</h3>
+<p>Nella cartella della policy (solo <code>rbac.rego</code> + <code>.manifest</code>, <strong>senza</strong> <code>.git</code>):</p>
+<pre><code>nerdctl run --rm -v ${PWD}:/work -w /work openpolicyagent/opa build -b . -o bundle.tar.gz</code></pre>
+<p><strong>Perché ogni pezzo:</strong></p>
+<ul>
+  <li><code>--rm</code> → container usa-e-getta: serve solo a eseguire il build ed esce.</li>
+  <li><code>-v ${PWD}:/work -w /work</code> → monta la cartella corrente come <code>/work</code> e ci si posiziona, così <code>opa build</code> vede i file della policy.</li>
+  <li><code>openpolicyagent/opa build -b .</code> → compila <strong>e valida</strong> la policy in un bundle. Usare <code>opa build</code> invece di creare il tar a mano dà validazione della sintassi Rego prima della pubblicazione.</li>
+  <li><code>-o bundle.tar.gz</code> → file di output.</li>
+</ul>
+<p><strong>Perché la cartella deve essere pulita (senza <code>.git</code>):</strong> <code>opa build -b .</code> include <em>ricorsivamente</em> tutto ciò che trova; una <code>.git</code> o file estranei finirebbero nel bundle.</p>
+<p>Caricare poi <code>bundle.tar.gz</code> come asset di una release (es. <code>v1</code>) sul repo <code>opa-policy</code>. <strong>Perché su GitHub:</strong> la policy è codice e va versionata (history, tag, rollback).</p>
+
+<h3>5. OPA</h3>
+<p>Con <code>opa-config.yaml</code> (vedi sotto) nella cartella corrente:</p>
+<pre><code>nerdctl run -d --name opa-bundles --network rbac-net -p 8181:8181 `
+  -v ${PWD}:/config:ro `
+  openpolicyagent/opa run --server --addr=0.0.0.0:8181 `
+  --config-file=/config/opa-config.yaml --log-level debug</code></pre>
+<p><strong>Perché ogni pezzo:</strong></p>
+<ul>
+  <li><code>-d --name opa-bundles</code> → in background, con nome fisso.</li>
+  <li><code>--network rbac-net</code> → sulla rete condivisa, così raggiunge Quarkus per nome.</li>
+  <li><code>-p 8181:8181</code> → espone l'API di OPA sull'host, per le query di decisione da <code>curl</code>.</li>
+  <li><code>-v ${PWD}:/config:ro</code> → <strong>monta la config locale</strong> nel container in sola lettura (<code>:ro</code>). OPA la legge dal disco, non la scarica.</li>
+  <li><code>--server</code> → avvia OPA come server HTTP (invece che CLI one-shot).</li>
+  <li><code>--addr=0.0.0.0:8181</code> → in ascolto su <strong>tutte</strong> le interfacce del container, non solo sul loopback: senza, il port-forward <code>-p</code> non funzionerebbe.</li>
+  <li><code>--config-file=/config/opa-config.yaml</code> → indica la config di bootstrap (il file montato): è ciò che "accende" i bundle loader.</li>
+  <li><code>--log-level debug</code> → log verbosi, utili per vedere download e attivazione dei bundle.</li>
+</ul>
+<p><strong>Perché OPA va ricreato a ogni modifica della config:</strong> la legge <strong>solo all'avvio</strong>, quindi un cambiamento richiede <code>nerdctl rm -f opa-bundles</code> seguito da un nuovo <code>run</code>.</p>
+<p><code>opa-config.yaml</code>:</p>
+<pre><code>services:
+  quarkus:
+    url: http://rbac-opa:8080
+  policy:
+    url: https://github.com
+
+bundles:
+  data:
+    service: quarkus
+    resource: /bundles/rbac.tar.gz
+    polling:
+      min_delay_seconds: 10
+      max_delay_seconds: 20
+  policy:
+    service: policy
+    resource: /&lt;utente&gt;/opa-policy/releases/download/v1/bundle.tar.gz
+    polling:
+      min_delay_seconds: 30
+      max_delay_seconds: 60</code></pre>
+
+<h2 id="riavvii">Riavvii successivi (non è il primo avvio)</h2>
+<p>Dopo il primo setup, <strong>non serve rifare tutto</strong>. La rete esiste già, le immagini sono già costruite, la policy è già su GitHub. Distinzione fondamentale tra due comandi di nerdctl:</p>
+<ul>
+  <li><code>nerdctl run</code> → <strong>crea</strong> un container nuovo (solo la prima volta).</li>
+  <li><code>nerdctl start</code> → <strong>riavvia</strong> un container già esistente che era stato fermato, mantenendone il filesystem (e quindi, per Oracle, i dati).</li>
+</ul>
+<p>Quindi, se avevi solo <strong>fermato</strong> i container (o riavviato il PC), l'avvio è molto più breve.</p>
+
+<h3>Caso A — i container esistono ancora (li avevi solo fermati)</h3>
+<p>Verifica cosa c'è, anche fermo:</p>
+<pre><code>nerdctl ps -a</code></pre>
+<p>Se vedi <code>oracle-poc</code>, <code>rbac-opa</code>, <code>opa-bundles</code> (in stato <code>Exited</code>), riavviali <strong>nello stesso ordine</strong> del primo avvio:</p>
+<pre><code>nerdctl start oracle-poc
+# attendi che Oracle sia di nuovo pronto prima di procedere:
+nerdctl logs -f oracle-poc   # cerca di nuovo "DATABASE IS READY TO USE!", poi Ctrl+C
+nerdctl start rbac-opa
+nerdctl start opa-bundles</code></pre>
+<p><strong>Perché quest'ordine anche al riavvio:</strong> Quarkus (<code>rbac-opa</code>) all'avvio si connette a Oracle, quindi Oracle deve essere di nuovo pronto prima; OPA (<code>opa-bundles</code>) al primo polling scarica il bundle da Quarkus, quindi Quarkus deve essere già su.</p>
+<blockquote><p><strong>Rete:</strong> <code>rbac-net</code> sopravvive ai riavvii, non va ricreata. Se non esistesse più (<code>nerdctl network ls</code> non la mostra), ricreala con <code>nerdctl network create rbac-net</code> <strong>prima</strong> di avviare i container.</p></blockquote>
+<blockquote><p><strong>OPA:</strong> non devi fare nulla di speciale. Alla ripartenza rilegge la config montata e <strong>riscarica da solo</strong> entrambi i bundle (è il vantaggio del modello pull: lo stato si ricostruisce). Dopo pochi secondi è di nuovo allineato.</p></blockquote>
+
+<h3>Caso B — i container erano stati rimossi (<code>rm</code>)</h3>
+<p>Se avevi fatto <code>nerdctl rm</code> (non solo <code>stop</code>), i container non esistono più e vanno <strong>ricreati</strong> con i comandi <code>run</code> della sezione precedente. In questo caso:</p>
+<ul>
+  <li><strong>Oracle</strong>: ricrearlo con <code>run</code> significa <strong>ripartire con il DB vuoto</strong> (non abbiamo un volume persistente). I dati vanno reinseriti via CRUD. Per la POC va bene; per la persistenza vedi sotto.</li>
+  <li><strong>Quarkus</strong>: l'immagine <code>poc/rbac-opa:latest</code> è già costruita, quindi <strong>non serve rifare il build</strong> — basta il comando <code>run</code>. Rifai il build <strong>solo se hai cambiato il codice</strong>.</li>
+  <li><strong>OPA</strong>: basta il <code>run</code>; config e bundle sono invariati.</li>
+</ul>
+
+<h3>Quando rifare il build di Quarkus</h3>
+<p>Solo se hai modificato il <strong>codice Java</strong> o le <strong>dipendenze</strong>:</p>
+<pre><code>.\mvnw clean package -DskipTests
+nerdctl build -f src/main/docker/Dockerfile.jvm -t poc/rbac-opa:latest .
+nerdctl rm -f rbac-opa
+nerdctl run -d --name rbac-opa --network rbac-net -p 8080:8080 poc/rbac-opa:latest</code></pre>
+<p>Se hai cambiato solo la <strong>policy</strong>, non tocchi Quarkus: rigeneri il bundle con <code>opa build</code>, lo ricarichi su GitHub, e OPA lo prende da solo al polling successivo (o ricrei OPA per forzarlo subito).</p>
+
+<h3>(Opzionale) Rendere persistenti i dati di Oracle</h3>
+<p>Per non perdere i dati quando ricrei il container Oracle, monta un volume:</p>
+<pre><code>nerdctl run -d --name oracle-poc --network rbac-net -p 1521:1521 `
+  -e ORACLE_PASSWORD=poc -e APP_USER=pocuser -e APP_USER_PASSWORD=pocpass `
+  -v oracle-data:/opt/oracle/oradata `
+  gvenzl/oracle-free</code></pre>
+<p>Il volume <code>oracle-data</code> sopravvive alla rimozione del container, così i dati restano.</p>
+
+<h2 id="verifiche">Verifiche</h2>
+<p>Bundle caricati (nei log di OPA cercare, per <code>data</code> e <code>policy</code>): <code>Bundle loaded and activated successfully</code>.</p>
+<p>Stato:</p>
+<pre><code>curl.exe http://localhost:8181/v1/status</code></pre>
+<p>Query di decisione (JSON in un file <code>query.json</code> per evitare problemi di escaping):</p>
+<pre><code># query.json:  { "input": { "user": "mario", "action": "read", "resource": "report" } }
+curl.exe http://localhost:8181/v1/data/authz/allow -H "Content-Type: application/json" --data-binary "@query.json"</code></pre>
+<p>Atteso: <code>{"result":true}</code> (e <code>false</code> per un'azione non concessa).</p>
+<p>Prova del giro dinamico: creare/modificare un utente via CRUD, attendere il polling (~15s), rifare la query → la decisione cambia senza aver toccato OPA.</p>
+
+<h2 id="limiti">Note e limiti (POC)</h2>
+<ul>
+  <li><code>quarkus.hibernate-orm.database.generation=update</code> fa creare lo schema a Hibernate: comodo in POC, <strong>da non usare in produzione</strong> (usare migration, es. Flyway).</li>
+  <li>Oracle non ha un volume persistente: ricreare il container azzera i dati (ricreabili via CRUD).</li>
+  <li>Le credenziali (<code>pocuser</code>/<code>pocpass</code>, ecc.) sono da POC: non usarle in ambienti reali.</li>
+  <li>CORS è abilitato in modo permissivo per lo sviluppo delle app Angular.</li>
+  <li>Latenza di propagazione: tra modifica su Oracle e aggiornamento di OPA passa il tempo di polling (10–20s per i dati).</li>
+</ul>
+
+<h2 id="prossimi">Prossimi passi</h2>
+<ul>
+  <li><strong>Dashboard admin (Angular)</strong>: UI sul CRUD di utenti/ruoli/permessi e associazioni.</li>
+  <li><strong>App di test (Angular)</strong>: interfaccia utente che mostra/nasconde azioni (es. pulsante "Elimina") in base alla risposta di OPA — demo visiva dell'intero giro.</li>
+  <li><strong>CI/CD della policy</strong>: GitHub Action che esegue <code>opa build</code> e pubblica il bundle a ogni push sulla policy ("policy as code" completo).</li>
+</ul>
+
+<footer>
+  POC RBAC + OPA · documento generato per il repository del progetto.
+</footer>
+
+</div>
+</body>
+</html>
