@@ -101,3 +101,10 @@ coverage/
 # ===========================
 .podman/
 docker-compose.override.yml
+
+# ===========================
+# Task handoff documents
+# ===========================
+tasks/
+!tasks/.gitkeep
+!tasks/_template.md
