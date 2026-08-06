@@ -21,8 +21,10 @@ public class AuthzResource {
     @Produces(MediaType.APPLICATION_JSON)
     public OpaResponse check(@QueryParam("user") String user,
                              @QueryParam("action") String action,
-                             @QueryParam("resource") String resource) {
-        OpaRequest request = new OpaRequest(new OpaInput(user, action, resource));
+                             @QueryParam("resource") String resource,
+                             @QueryParam("status") String status) {
+        OpaInput input = new OpaInput(user, action, resource, status);
+        OpaRequest request = new OpaRequest(input);
         return opaClient.checkAllow(request);
     }
 }
