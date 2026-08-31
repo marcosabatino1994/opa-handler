@@ -1,6 +1,7 @@
 package com.poc.bundle;
 
 import com.poc.repository.AppUser;
+import com.poc.repository.Delegation;
 import com.poc.repository.Permission;
 import com.poc.repository.Role;
 import java.io.ByteArrayOutputStream;
@@ -55,9 +56,21 @@ public class BundleService {
             rolePerms.put(r.name, perms);
         }
 
+        // delegations: [ {from_user, to_user, action, resource}, ... ]
+        List<Map<String, String>> delegations = new ArrayList<>();
+        for (Delegation d : Delegation.<Delegation>listAll()) {
+            Map<String, String> entry = new LinkedHashMap<>();
+            entry.put("from_user", d.fromUser);
+            entry.put("to_user", d.toUser);
+            entry.put("action", d.action);
+            entry.put("resource", d.resource);
+            delegations.add(entry);
+        }
+
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("user_roles", userRoles);
         data.put("role_permissions", rolePerms);
+        data.put("delegations", delegations);
 
         try {
             return objectMapper.writeValueAsString(data);
@@ -80,7 +93,7 @@ public class BundleService {
     /** Impacchetta manifest + data in un bundle .tar.gz (solo dati, niente policy). */
     public byte[] buildBundle(String dataJson, String revision) {
         String manifest = "{\"revision\":\"" + revision
-                + "\",\"roots\":[\"user_roles\",\"role_permissions\"]}";
+                + "\",\"roots\":[\"user_roles\",\"role_permissions\",\"delegations\"]}";
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             try (GZIPOutputStream gz = new GZIPOutputStream(baos);
