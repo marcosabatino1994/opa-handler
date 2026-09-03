@@ -139,7 +139,7 @@
 <header class="hero">
   <p class="eyebrow">Proof of Concept</p>
   <h1>RBAC con Open Policy Agent (OPA)</h1>
-  <p class="lead">Un sistema di autorizzazione basato su ruoli in cui una console di amministrazione gestisce utenti, ruoli e permessi su database, e OPA prende le decisioni leggendo quei dati.</p>
+  <p class="lead">Un sistema di autorizzazione basato su ruoli in cui una console di amministrazione gestisce utenti, ruoli, permessi e deleghe su database, e OPA prende le decisioni leggendo quei dati.</p>
   <p>L'architettura segue il pattern <strong>produzione</strong>: policy e dati vivono in <strong>due bundle separati</strong>, serviti da sorgenti diverse, che OPA scarica autonomamente (pull) e combina in memoria.</p>
 </header>
 
@@ -251,8 +251,8 @@
     <tr><td><strong>Quarkus</strong></td><td>Backend REST: CRUD della dashboard + generazione del bundle DATI dal DB</td><td>container <code>rbac-opa</code>, porta 8080</td></tr>
     <tr><td><strong>OPA</strong></td><td>Motore di decisione: scarica i due bundle, li combina, valuta le query</td><td>container <code>opa-bundles</code>, porta 8181</td></tr>
     <tr><td><strong>GitHub Releases</strong></td><td>Sorgente del bundle POLICY (rbac.rego versionata)</td><td>repo <code>opa-policy</code>, release <code>v1</code>, asset <code>bundle.tar.gz</code></td></tr>
-    <tr><td><strong>Dashboard admin</strong></td><td><span class="pill">da fare</span> UI Angular sul CRUD</td><td>—</td></tr>
-    <tr><td><strong>App di test</strong></td><td><span class="pill">da fare</span> UI Angular che interroga OPA</td><td>—</td></tr>
+    <tr><td><strong>Dashboard admin</strong></td><td>UI Angular sul CRUD di utenti/ruoli/permessi/deleghe e tratte</td><td>progetto <code>opa-handler-fe</code> (vedi il suo README per l'avvio)</td></tr>
+    <tr><td><strong>App di test</strong></td><td>UI Angular che interroga OPA: per ogni tratta mostra/nasconde le azioni</td><td>progetto <code>opa-handler-fe</code></td></tr>
   </tbody>
 </table>
 <p>Tutti i container stanno sulla stessa rete <code>rbac-net</code> e si raggiungono per nome.</p>
@@ -268,14 +268,15 @@
 <blockquote><p>NON serve versionare <code>opa-config.yaml</code> su GitHub perché OPA la usi — OPA non la legge da lì. Tenerla in un repo è solo buona pratica di versionamento, non un ingranaggio del meccanismo. (Esiste un meccanismo avanzato, il <em>discovery bundle</em>, con cui OPA può scaricare anche parte della propria config da remoto, ma qui non è usato.)</p></blockquote>
 
 <h2 id="scenario">Come funziona il giro (scenario)</h2>
-<p>Scenario: <em>l'amministratore concede a Luigi il permesso di eliminare i report, e nell'app Luigi vede comparire il pulsante "Elimina".</em></p>
+<p>Scenario: <em>l'amministratore concede a Luigi il permesso di eliminare le tratte, e nell'app Luigi vede comparire il pulsante "Elimina".</em></p>
 <ol>
-  <li><strong>L'admin modifica i permessi.</strong> Dalla dashboard assegna a Luigi il ruolo <code>editor</code> (che include <code>delete</code>/<code>report</code>). La dashboard chiama l'API di Quarkus, che scrive su <strong>Oracle</strong> (nuova riga nella tabella ponte <code>USER_ROLES</code>). Qui finisce l'intervento umano: tutto il resto è automatico.</li>
+  <li><strong>L'admin modifica i permessi.</strong> Dalla dashboard assegna a Luigi il ruolo <code>editor</code> (che include <code>delete</code>/<code>tratta</code>). La dashboard chiama l'API di Quarkus, che scrive su <strong>Oracle</strong> (nuova riga nella tabella ponte <code>USER_ROLES</code>). Qui finisce l'intervento umano: tutto il resto è automatico.</li>
   <li><strong>Oracle è aggiornato, OPA ancora no.</strong> Per qualche secondo il DB e OPA divergono. È il prezzo (accettabile) del disaccoppiamento: si chiude da solo.</li>
   <li><strong>OPA fa il polling (entro 10–20s).</strong> OPA chiama <code>GET /bundles/rbac.tar.gz</code> di Quarkus. Quarkus <strong>legge Oracle in tempo reale</strong>, costruisce il JSON dei dati, lo impacchetta e lo restituisce. OPA vede l'ETag cambiato e <strong>attiva il nuovo bundle</strong>. Ora anche OPA sa che Luigi è editor. (In parallelo ricontrolla la policy da GitHub: invariata → <code>304 Not Modified</code>.)</li>
-  <li><strong>Luigi apre l'app.</strong> L'app chiede a OPA "luigi può fare <code>delete</code> su <code>report</code>?". OPA combina la <strong>regola</strong> (bundle policy da GitHub) con i <strong>fatti</strong> (bundle dati da Oracle) e risponde <code>true</code>. L'app mostra il pulsante "Elimina".</li>
+  <li><strong>Luigi apre l'app.</strong> L'app chiede a OPA "luigi può fare <code>delete</code> su <code>tratta</code>?". OPA combina la <strong>regola</strong> (bundle policy da GitHub) con i <strong>fatti</strong> (bundle dati da Oracle) e risponde <code>true</code>. L'app mostra il pulsante "Elimina".</li>
 </ol>
 <blockquote><p><strong>Punto chiave:</strong> l'admin ha toccato solo il database. Nessuno ha aggiornato OPA a mano né ridistribuito codice. Il cambiamento è fluito da solo.</p></blockquote>
+<p><strong>Variante con delega.</strong> Lo stesso pulsante può comparire per un'altra strada: se Luigi non ha il ruolo ma un utente che possiede <code>delete</code>/<code>tratta</code> glielo <strong>delega</strong> (via <code>POST /delegations</code>), la delega entra nel bundle dati e la policy la riconosce. Risultato identico — pulsante visibile — ma concesso per delega anziché per ruolo.</p>
 
 <h2 id="decisioni">Decisioni di progetto e relativi perché</h2>
 
@@ -301,7 +302,7 @@
 <p>Spinta pratica (il firewall dell'host bloccava le connessioni OPA→Quarkus quando Quarkus girava fuori container), ma coincide con la produzione: tutto in container sulla stessa rete, i servizi si parlano per nome.</p>
 
 <h3>Perché i <code>roots</code> nei manifest dei bundle?</h3>
-<p>Per far convivere due bundle senza conflitti. Ogni bundle dichiara quale ramo di <code>data</code> possiede — <code>authz</code> per la policy, <code>user_roles</code>/<code>role_permissions</code> per i dati. Nessuna sovrapposizione → OPA li accetta entrambi.</p>
+<p>Per far convivere due bundle senza conflitti. Ogni bundle dichiara quale ramo di <code>data</code> possiede — <code>authz</code> per la policy, <code>user_roles</code>/<code>role_permissions</code>/<code>delegations</code> per i dati. Nessuna sovrapposizione → OPA li accetta entrambi.</p>
 
 <h3>Perché i DTO nel CRUD e non le entità dirette?</h3>
 <p>Per evitare il <code>LazyInitializationException</code> di Hibernate (le collezioni lazy esplodono se serializzate fuori transazione) e per disaccoppiare il modello DB dal contratto REST.</p>
@@ -316,18 +317,24 @@ APP_ROLES (id, name)
 PERMISSIONS (id, action, resource_name)
 
 USER_ROLES (user_id → APP_USERS, role_id → APP_ROLES)                -- tabella ponte
-ROLE_PERMISSIONS (role_id → APP_ROLES, permission_id → PERMISSIONS)  -- tabella ponte</code></pre>
+ROLE_PERMISSIONS (role_id → APP_ROLES, permission_id → PERMISSIONS)  -- tabella ponte
+
+DELEGATIONS (id, from_user, to_user, action, resource_name)         -- deleghe puntuali (per username, non per FK)
+ROUTES (id, origin, destination, modes, status)                     -- tratte: dominio dell'app di test</code></pre>
 <ul>
   <li><code>APP_USERS</code> ↔ <code>APP_ROLES</code>: molti-a-molti tramite <code>USER_ROLES</code>.</li>
   <li><code>APP_ROLES</code> ↔ <code>PERMISSIONS</code>: molti-a-molti tramite <code>ROLE_PERMISSIONS</code>.</li>
 </ul>
-<p>Le due tabelle ponte sono l'unica informazione necessaria a costruire i dati di OPA: <code>USER_ROLES</code> → <code>user_roles</code>, <code>ROLE_PERMISSIONS</code> (join con <code>PERMISSIONS</code>) → <code>role_permissions</code>.</p>
+<p>Le tabelle ponte e le deleghe alimentano i dati di OPA: <code>USER_ROLES</code> → <code>user_roles</code>, <code>ROLE_PERMISSIONS</code> (join con <code>PERMISSIONS</code>) → <code>role_permissions</code>, <code>DELEGATIONS</code> → <code>delegations</code>. La tabella <code>ROUTES</code> <strong>non</strong> entra nel bundle: è il dominio su cui l'app di test interroga OPA, non un fatto di autorizzazione.</p>
 <p>Esempio del JSON dati prodotto per OPA:</p>
 <pre><code>{
   "user_roles": { "mario": ["admin"] },
   "role_permissions": {
-    "admin": [ { "action": "read", "resource": "report" } ]
-  }
+    "admin": [ { "action": "read", "resource": "tratta" } ]
+  },
+  "delegations": [
+    { "from_user": "mario", "to_user": "luigi", "action": "delete", "resource": "tratta" }
+  ]
 }</code></pre>
 <p>La policy Rego (<code>rbac.rego</code>, ramo <code>authz</code>):</p>
 <pre><code>package authz
@@ -336,11 +343,20 @@ import rego.v1
 
 default allow := false
 
+# via ruolo: l'utente ha un ruolo che possiede il permesso richiesto
 allow if {
     some role in data.user_roles[input.user]
     some perm in data.role_permissions[role]
     perm.action == input.action
     perm.resource == input.resource
+}
+
+# via delega: esiste una delega verso l'utente per quell'azione/risorsa
+allow if {
+    some d in data.delegations
+    d.to_user == input.user
+    d.action == input.action
+    d.resource == input.resource
 }</code></pre>
 
 <h2 id="endpoint">Endpoint del backend</h2>
@@ -351,7 +367,9 @@ allow if {
     <tr><td>GET/POST/PUT/DELETE</td><td><code>/permissions</code></td><td>CRUD permessi</td></tr>
     <tr><td>GET/POST/PUT/DELETE</td><td><code>/roles</code></td><td>CRUD ruoli — body: <code>{ "name": "...", "permissionIds": [..] }</code></td></tr>
     <tr><td>GET/POST/PUT/DELETE</td><td><code>/users</code></td><td>CRUD utenti — body: <code>{ "username": "...", "roleIds": [..] }</code></td></tr>
-    <tr><td>GET</td><td><code>/authz?user=..&amp;action=..&amp;resource=..</code></td><td>Proxy che interroga OPA</td></tr>
+    <tr><td>GET/POST/DELETE</td><td><code>/delegations</code></td><td>Deleghe puntuali — body POST: <code>{ "fromUser", "toUser", "action", "resource" }</code>; valida che il delegante possieda davvero quel permesso</td></tr>
+    <tr><td>GET/POST/PUT/DELETE</td><td><code>/routes</code></td><td>CRUD tratte, più <code>POST /routes/{id}/approve</code> e <code>/reject</code> per il ciclo <code>IN_REVISIONE → APPROVATA | RIFIUTATA</code></td></tr>
+    <tr><td>GET</td><td><code>/authz?user=..&amp;action=..&amp;resource=..&amp;status=..</code></td><td>Proxy che interroga OPA (<code>status</code> opzionale)</td></tr>
     <tr><td>GET</td><td><code>/bundles/rbac.tar.gz</code></td><td>Bundle DATI per OPA (generato dal DB, con ETag)</td></tr>
   </tbody>
 </table>
@@ -359,7 +377,7 @@ allow if {
 <table>
   <thead><tr><th>Metodo</th><th>Path</th><th>Descrizione</th></tr></thead>
   <tbody>
-    <tr><td>POST</td><td><code>/v1/data/authz/allow</code></td><td>Query di decisione; body <code>{ "input": { "user", "action", "resource" } }</code></td></tr>
+    <tr><td>POST</td><td><code>/v1/data/authz/allow</code></td><td>Query di decisione; body <code>{ "input": { "user", "action", "resource", "status?" } }</code> (la policy attuale usa solo user/action/resource)</td></tr>
     <tr><td>GET</td><td><code>/v1/status</code></td><td>Stato dei bundle attivi (revision)</td></tr>
     <tr><td>GET</td><td><code>/health</code></td><td>Health check</td></tr>
   </tbody>
@@ -503,7 +521,7 @@ nerdctl run -d --name rbac-opa --network rbac-net -p 8080:8080 poc/rbac-opa:late
 <p>Stato:</p>
 <pre><code>curl.exe http://localhost:8181/v1/status</code></pre>
 <p>Query di decisione (JSON in un file <code>query.json</code> per evitare problemi di escaping):</p>
-<pre><code># query.json:  { "input": { "user": "mario", "action": "read", "resource": "report" } }
+<pre><code># query.json:  { "input": { "user": "mario", "action": "read", "resource": "tratta" } }
 curl.exe http://localhost:8181/v1/data/authz/allow -H "Content-Type: application/json" --data-binary "@query.json"</code></pre>
 <p>Atteso: <code>{"result":true}</code> (e <code>false</code> per un'azione non concessa).</p>
 <p>Prova del giro dinamico: creare/modificare un utente via CRUD, attendere il polling (~15s), rifare la query → la decisione cambia senza aver toccato OPA.</p>
@@ -515,12 +533,14 @@ curl.exe http://localhost:8181/v1/data/authz/allow -H "Content-Type: application
   <li>Le credenziali (<code>pocuser</code>/<code>pocpass</code>, ecc.) sono da POC: non usarle in ambienti reali.</li>
   <li>CORS è abilitato in modo permissivo per lo sviluppo delle app Angular.</li>
   <li>Latenza di propagazione: tra modifica su Oracle e aggiornamento di OPA passa il tempo di polling (10–20s per i dati).</li>
+  <li>Le deleghe sono riferite per <strong>username</strong> (stringhe), senza foreign key verso gli utenti: una delega <strong>sopravvive</strong> alla cancellazione del <code>fromUser</code> o alla rimozione del suo ruolo — è validata solo alla creazione, mai ri-verificata. In un sistema reale servirebbe integrità referenziale o una ri-validazione nel bundle.</li>
+  <li>Il campo <code>status</code> delle tratte viene passato a OPA nell'input di <code>/authz</code>, ma la policy attuale <strong>non lo usa</strong> ancora: la decisione dipende solo da user/action/resource.</li>
 </ul>
 
 <h2 id="prossimi">Prossimi passi</h2>
 <ul>
-  <li><strong>Dashboard admin (Angular)</strong>: UI sul CRUD di utenti/ruoli/permessi e associazioni.</li>
-  <li><strong>App di test (Angular)</strong>: interfaccia utente che mostra/nasconde azioni (es. pulsante "Elimina") in base alla risposta di OPA — demo visiva dell'intero giro.</li>
+  <li><strong>Policy <code>status</code>-aware</strong>: estendere <code>rbac.rego</code> perché usi anche lo <code>status</code> della tratta (es. <code>read</code> solo su <code>APPROVATA</code>, <code>approve</code>/<code>reject</code> solo su <code>IN_REVISIONE</code>).</li>
+  <li><strong>Integrità delle deleghe</strong>: legare le deleghe agli utenti (FK/cascade) o ri-validarle nel bundle, così che decadano quando il delegante perde il permesso.</li>
   <li><strong>CI/CD della policy</strong>: GitHub Action che esegue <code>opa build</code> e pubblica il bundle a ogni push sulla policy ("policy as code" completo).</li>
 </ul>
 
